@@ -3,43 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ОРБИТА | Глобальный Мониторинг</title>
+    <title>ОРБИТА | Глобальный Планетарий</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
-        :root { --bg-color: #010103; --text-color: #ffffff; --accent-color: #00f2ff; --font: 'Courier New', Courier, monospace; }
-        body.iss-overhead { --bg-color: #f5f5f7; --text-color: #000000; --accent-color: #ff0055; }
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); color: var(--text-color); font-family: var(--font); transition: background 1.5s, color 1s; }
+        :root {
+            --bg-color: #010103;
+            --text-color: #ffffff;
+            --accent-color: #00f2ff;
+            --font: 'Courier New', Courier, monospace;
+        }
+
+        body.iss-overhead {
+            --bg-color: #f5f5f7;
+            --text-color: #000000;
+            --accent-color: #ff0055;
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font);
+            transition: background 1.5s, color 1s;
+        }
+
         #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #loading-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 1s; }
-        .ui { position: relative; z-index: 10; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 40px; box-sizing: border-box; pointer-events: none; }
+
+        /* Экран загрузки */
+        #loading-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-color); z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 1s;
+        }
+
+        .ui {
+            position: relative; z-index: 10;
+            height: 100vh; display: flex;
+            flex-direction: column; justify-content: space-between;
+            padding: 40px; box-sizing: border-box;
+            pointer-events: none;
+        }
+
         .header, .telemetry { pointer-events: auto; }
         .clock { font-size: 3.5rem; letter-spacing: -3px; margin: 0; }
         .label { font-size: 0.7rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 2px; }
-        .telemetry { background: rgba(0,0,0,0.6); backdrop-filter: blur(15px); padding: 20px; border-left: 2px solid var(--accent-color); width: fit-content; }
+
+        .telemetry {
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(15px);
+            padding: 20px; border-left: 2px solid var(--accent-color);
+            width: fit-content;
+        }
+
         .dist-val { font-size: 2rem; color: var(--accent-color); }
-        .user-tag { position: absolute; top: 40px; right: 40px; text-align: right; border-right: 2px solid var(--accent-color); padding-right: 15px; pointer-events: auto; }
-        button { background: var(--accent-color); border: none; color: #00; padding: 5px 10px; cursor: pointer; font-family: inherit; font-size: 0.7rem; margin-top: 10px; }
+
+        .user-tag {
+            position: absolute; top: 40px; right: 40px; text-align: right;
+            border-right: 2px solid var(--accent-color); padding-right: 15px;
+            pointer-events: auto;
+        }
+
+        button {
+            background: var(--accent-color); border: none; color: #00;
+            padding: 5px 10px; cursor: pointer; font-family: inherit; font-size: 0.7rem;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
+
     <div id="loading-screen">
-        <div class="label">Синхронизация с орбитой...</div>
-        <div id="load-status" style="margin-top: 10px; font-size: 0.8rem;">Загрузка объектов системы</div>
+        <div class="label">Синхронизация с системой...</div>
+        <div id="load-status" style="margin-top: 10px; font-size: 0.8rem;">Загрузка объектов</div>
     </div>
+
     <div id="canvas-container"></div>
+
     <main class="ui">
         <div class="user-tag">
             <span class="label">Ваш сектор</span><br>
             <span id="u-coords">ОПРЕДЕЛЕНИЕ...</span><br>
             <button onclick="requestNotifications()">ВКЛ. УВЕДОМЛЕНИЯ</button>
         </div>
+
         <section class="header">
             <h1 id="time" class="clock">00:00:00</h1>
             <p id="overhead-msg" style="margin-top: 10px; font-weight: bold; font-size: 0.8rem;">ПОИСК СИГНАЛА МКС...</p>
         </section>
+
         <section class="telemetry">
-            <div class="dist-box"><span class="label">Дистанция до цели</span><div id="distance" class="dist-val">--- КМ</div></div>
+            <div class="dist-box">
+                <span class="label">Дистанция до цели</span>
+                <div id="distance" class="dist-val">--- КМ</div>
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 0.8rem;">
                 <div><span class="label">LAT ISS</span><br><span id="lat-iss">0.00</span></div>
                 <div><span class="label">LNG ISS</span><br><span id="lng-iss">0.00</span></div>
@@ -48,7 +107,7 @@
     </main>
 
     <script>
-        let scene, camera, renderer, controls, earth, issModel, userPin;
+        let scene, camera, renderer, controls, earth, issModel, userPin, spaceShader;
         let uLat = null, uLng = null;
         let notificationSent = false;
         let targetISSParams = { lat: 0, lng: 0, alt: 420 };
@@ -61,6 +120,7 @@
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -68,7 +128,7 @@
             controls.minDistance = 6;
             controls.maxDistance = 800;
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+            scene.add(new THREE.AmbientLight(0xffffff, 0.2));
             const sunLight = new THREE.PointLight(0xffffff, 1.5, 2000);
             sunLight.position.set(150, 50, 150);
             scene.add(sunLight);
@@ -76,39 +136,132 @@
             const loader = new THREE.TextureLoader();
             
             // Земля
-            earth = new THREE.Mesh(
-                new THREE.SphereGeometry(5, 64, 64),
-                new THREE.MeshPhongMaterial({
-                    map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
-                    bumpMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
-                    bumpScale: 0.05
-                })
-            );
+            const earthGeom = new THREE.SphereGeometry(5, 64, 64);
+            const earthMat = new THREE.MeshPhongMaterial({
+                map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
+                bumpMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
+                bumpScale: 0.05
+            });
+            earth = new THREE.Mesh(earthGeom, earthMat);
             scene.add(earth);
 
-            // Звезды
-            const starGeom = new THREE.SphereGeometry(1000, 32, 32);
-            const starMat = new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.BackSide });
-            scene.add(new THREE.Mesh(starGeom, starMat));
+            // --- ШЕЙДЕРНЫЙ КОСМОС (Shader Cube) ---
+            const spaceVertexShader = `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `;
+            const spaceFragmentShader = `
+                varying vec2 vUv;
+                uniform float time;
+                
+                // Простая функция шума
+                float noise(vec3 p) {
+                    vec3 i = floor(p);
+                    vec3 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(mix(mix(dot(vec3(0,0,0), f - vec3(0,0,0)), dot(vec3(1,0,0), f - vec3(1,0,0)), f.x),
+                                mix(mix(dot(vec3(0,1,0), f - vec3(0,1,0)), dot(vec3(1,1,0), f - vec3(1,1,0)), f.x),
+                                mix(mix(dot(vec3(0,0,1), f - vec3(0,0,1)), dot(vec3(1,0,1), f - vec3(1,0,1)), f.x),
+                                mix(mix(dot(vec3(0,1,1), f - vec3(0,1,1)), dot(vec3(1,1,1), f - vec3(1,1,1)), f.x), f.y), f.z);
+                }
 
-            // ПЛАНЕТЫ (Добавляем упрощенно, если текстуры не подгрузятся)
+                void main() {
+                    vec2 coord = vUv * 5.0;
+                    float speed = time * 0.1;
+                    vec3 col = vec3(0.0);
+                    
+                    // Слои туманностей
+                    col += vec3(0.1, 0.0, 0.2) * noise(vec3(coord, speed));
+                    col += vec3(0.0, 0.05, 0.15) * noise(vec3(coord + 10.0, speed * 1.5));
+                    
+                    // Звезды
+                    if (noise(vec3(coord * 50.0, 0.0)) > 0.8) {
+                        col += vec3(0.8, 0.8, 1.0) * pow(noise(vec3(coord * 50.0 + time, 0.0)), 10.0);
+                    }
+                    
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `;
+            const spaceGeom = new THREE.SphereGeometry(1000, 32, 32);
+            spaceShader = new THREE.ShaderMaterial({
+                vertexShader: spaceVertexShader,
+                fragmentShader: spaceFragmentShader,
+                uniforms: { time: { value: 0.0 } },
+                side: THREE.BackSide
+            });
+            scene.add(new THREE.Mesh(spaceGeom, spaceShader));
+
+            // --- ШЕЙДЕР СВЕЧЕНИЯ ПЛАНЕТ (GlowShader) ---
+            const glowVertexShader = `
+                varying vec3 vNormal;
+                varying vec3 vPositionNormal;
+                void main() {
+                    vNormal = normalize( normalMatrix * normal );
+                    vPositionNormal = normalize( ( modelViewMatrix * vec4(position, 1.0) ).xyz );
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `;
+            const glowFragmentShader = `
+                uniform vec3 glowColor;
+                uniform float p;
+                uniform float c;
+                varying vec3 vNormal;
+                varying vec3 vPositionNormal;
+                void main() {
+                    float a = pow( c - dot(vNormal, vPositionNormal), p );
+                    gl_FragColor = vec4( glowColor, a );
+                }
+            `;
+
+            // ПЛАНЕТЫ (С добавлением свечения и траекторий)
             const pData = [
-                { n: 'Sun', r: 15, d: 200, c: 0xffcc00 },
-                { n: 'Mars', r: 2, d: 40, c: 0xff4400 },
-                { n: 'Jupiter', r: 12, d: 90, c: 0xffaa88 },
-                { n: 'Saturn', r: 10, d: 140, c: 0xeeeeaa }
+                { n: 'Sun', r: 15, d: 200, c: 0xffcc00, g: 0xffffaa },
+                { n: 'Mars', r: 2, d: 40, c: 0xff4400, g: 0xffaaaa },
+                { n: 'Jupiter', r: 12, d: 90, c: 0xffaa88, g: 0xffccaa },
+                { n: 'Saturn', r: 10, d: 140, c: 0xeeeeaa, g: 0xffffcc }
             ];
 
             pData.forEach(p => {
                 const group = new THREE.Group();
-                const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r, 32, 32), new THREE.MeshPhongMaterial({ color: p.c }));
+                
+                // Модель планеты
+                const meshMat = new THREE.MeshPhongMaterial({ color: p.c });
+                const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r, 32, 32), meshMat);
                 mesh.position.x = p.d;
+                
+                // Добавление свечения
+                const glowMat = new THREE.ShaderMaterial({
+                    vertexShader: glowVertexShader,
+                    fragmentShader: glowFragmentShader,
+                    uniforms: {
+                        c: { type: "f", value: 1.0 },
+                        p: { type: "f", value: 3.0 }, // Сила свечения
+                        glowColor: { type: "c", value: new THREE.Color(p.g) }
+                    },
+                    side: THREE.BackSide,
+                    blending: THREE.AdditiveBlending,
+                    transparent: true
+                });
+                const glowMesh = new THREE.Mesh(new THREE.SphereGeometry(p.r * 1.2, 32, 32), glowMat); // Больше чем планета
+                mesh.add(glowMesh);
+
                 group.add(mesh);
                 scene.add(group);
+
+                // --- ТРАЕКТОРИЯ ОРБИТЫ (Torus) ---
+                const trajectoryMat = new THREE.MeshBasicMaterial({ color: p.c, transparent: true, opacity: 0.1 });
+                const trajectoryGeom = new THREE.TorusGeometry(p.d, 0.1, 8, 100);
+                const trajectory = new THREE.Mesh(trajectoryGeom, trajectoryMat);
+                trajectory.rotation.x = Math.PI / 2; // Плоскость орбиты
+                scene.add(trajectory);
+
                 planets.push({ mesh: group, speed: 0.002 / (p.d/50) });
             });
 
-            // МКС (Миниатюрная реалистичная модель)
+            // МКС (Более видимая)
             issModel = new THREE.Group();
             const matMtl = new THREE.MeshStandardMaterial({color: 0xcccccc});
             const matPan = new THREE.MeshStandardMaterial({color: 0xb37a1a, side: THREE.DoubleSide});
@@ -121,7 +274,11 @@
                 p.rotation.x = Math.PI/2;
                 issModel.add(p);
             }
-            issModel.scale.set(0.15, 0.15, 0.15);
+            // --- УВЕЛИЧЕННЫЙ МАСШТАБ И СОБСТВЕННЫЙ СВЕТ МКС ---
+            issModel.scale.set(0.45, 0.45, 0.45); // В 3 раза больше
+            const issLight = new THREE.PointLight(0x00f2ff, 1.0, 5); // Синее свечение
+            issModel.add(issLight);
+            
             scene.add(issModel);
 
             // КРАСНАЯ БУЛАВКА
@@ -132,7 +289,7 @@
             pinHead.position.y = 0.3;
             userPin.add(pinLeg, pinHead);
             scene.add(userPin);
-            userPin.visible = false; // Скрыта до получения координат
+            userPin.visible = false; 
 
             camera.position.set(10, 10, 20);
         }
@@ -183,10 +340,14 @@
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
+            
+            // Обновление шейдера космоса (время)
+            spaceShader.uniforms.time.value += 0.01;
+            
             planets.forEach(p => { p.mesh.rotation.y += p.speed; });
             currentISSParams.lat = THREE.MathUtils.lerp(currentISSParams.lat, targetISSParams.lat, lerpSpeed);
             currentISSParams.lng = THREE.MathUtils.lerp(currentISSParams.lng, targetISSParams.lng, lerpSpeed);
-            mapToSphere(issModel, currentISSParams.lat, currentISSParams.lng, 5.4);
+            mapToSphere(issModel, currentISSParams.lat, currentISSParams.lng, 5.5); // Орбита чуть выше
             issModel.lookAt(0,0,0); issModel.rotateY(Math.PI/2);
             renderer.render(scene, camera);
             document.getElementById('time').innerText = new Date().toLocaleTimeString();
