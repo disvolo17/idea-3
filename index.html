@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ОРБИТА | Глобальный Планетарий</title>
+    <title>ОРБИТА | Глобальный Наблюдательный Пункт</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
@@ -11,6 +11,7 @@
             --bg-color: #010103;
             --text-color: #ffffff;
             --accent-color: #00f2ff;
+            --danger-color: #ff1212;
             --font: 'Courier New', Courier, monospace;
         }
 
@@ -48,7 +49,7 @@
             pointer-events: none;
         }
 
-        .header, .telemetry { pointer-events: auto; }
+        .header, .telemetry, #planet-card { pointer-events: auto; }
         .clock { font-size: 3.5rem; letter-spacing: -3px; margin: 0; }
         .label { font-size: 0.7rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 2px; }
 
@@ -71,6 +72,28 @@
             padding: 5px 10px; cursor: pointer; font-family: inherit; font-size: 0.7rem;
             margin-top: 10px;
         }
+
+        /* --- КАРТОЧКА ПЛАНЕТЫ (Скрыта по умолчанию) --- */
+        #planet-card {
+            position: absolute; bottom: 40px; right: 40px;
+            width: 300px; padding: 20px;
+            background: rgba(0,0,0,0.8); backdrop-filter: blur(10px);
+            border: 1px solid var(--accent-color);
+            display: none; flex-direction: column;
+            animation: slideIn 0.3s ease-out;
+            pointer-events: auto;
+        }
+
+        #planet-card h3 { margin: 0; font-size: 1.5rem; color: var(--accent-color); }
+        #planet-card p { font-size: 0.8rem; line-height: 1.6; margin-top: 10px; }
+        
+        #close-card {
+            position: absolute; top: 10px; right: 10px;
+            color: #fff; background: none; border: none;
+            cursor: pointer; font-family: inherit;
+        }
+
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
 </head>
 <body>
@@ -94,6 +117,12 @@
             <p id="overhead-msg" style="margin-top: 10px; font-weight: bold; font-size: 0.8rem;">ПОИСК СИГНАЛА МКС...</p>
         </section>
 
+        <div id="planet-card">
+            <button id="close-card" onclick="closePlanetCard()">[X]</button>
+            <h3 id="planet-name">Планета X</h3>
+            <p id="planet-desc">Описание отсутствует.</p>
+        </div>
+
         <section class="telemetry">
             <div class="dist-box">
                 <span class="label">Дистанция до цели</span>
@@ -113,7 +142,19 @@
         let targetISSParams = { lat: 0, lng: 0, alt: 420 };
         let currentISSParams = { lat: 0, lng: 0, alt: 420 };
         const lerpSpeed = 0.05;
+        
         let planets = [];
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+
+        // --- БАЗА ДАННЫХ О ПЛАНЕТАХ (На русском) ---
+        const planetInfoDB = {
+            'Солнце': 'Центральная звезда нашей системы. Массивная сфера раскаленной плазмы, дающая свет и жизнь. Температура поверхности ~5,500°C.',
+            'Марс': 'Четвертая планета. Известна как "Красная планета" из-за оксида железа. Тонкая атмосфера, полярные шапки и русла высохших рек.',
+            'Юпитер': 'Самая большая планета системы. Газовый гигант с Большим Красным Пятном (гигантский шторм) и десятками спутников.',
+            'Сатурн': 'Шестая планета. Славится своей потрясающей системой колец, состоящей из льда, камней и пыли. Газовый гигант.',
+            'МКС': 'Международная космическая станция. Единственный рукотворный объект, который мы сейчас отслеживаем в реальном времени.'
+        };
 
         function initScene() {
             scene = new THREE.Scene();
@@ -123,13 +164,14 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
+            // OrbitControls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.minDistance = 6;
-            controls.maxDistance = 800;
+            controls.maxDistance = 1500; // Отдаляем для обзора всей системы
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.2));
-            const sunLight = new THREE.PointLight(0xffffff, 1.5, 2000);
+            const sunLight = new THREE.PointLight(0xffffff, 2, 2000);
             sunLight.position.set(150, 50, 150);
             scene.add(sunLight);
 
@@ -143,58 +185,20 @@
                 bumpScale: 0.05
             });
             earth = new THREE.Mesh(earthGeom, earthMat);
+            earth.name = 'Земля'; // Имя для кликов
             scene.add(earth);
 
-            // --- ШЕЙДЕРНЫЙ КОСМОС (Shader Cube) ---
-            const spaceVertexShader = `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `;
-            const spaceFragmentShader = `
-                varying vec2 vUv;
-                uniform float time;
-                
-                // Простая функция шума
-                float noise(vec3 p) {
-                    vec3 i = floor(p);
-                    vec3 f = fract(p);
-                    f = f * f * (3.0 - 2.0 * f);
-                    return mix(mix(mix(dot(vec3(0,0,0), f - vec3(0,0,0)), dot(vec3(1,0,0), f - vec3(1,0,0)), f.x),
-                                mix(mix(dot(vec3(0,1,0), f - vec3(0,1,0)), dot(vec3(1,1,0), f - vec3(1,1,0)), f.x),
-                                mix(mix(dot(vec3(0,0,1), f - vec3(0,0,1)), dot(vec3(1,0,1), f - vec3(1,0,1)), f.x),
-                                mix(mix(dot(vec3(0,1,1), f - vec3(0,1,1)), dot(vec3(1,1,1), f - vec3(1,1,1)), f.x), f.y), f.z);
-                }
+            // --- КОСМОС (Густое Звездное Поле - Проверенный метод) ---
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 1.0 });
+            const starsVertices = [];
+            for (let i = 0; i < 20000; i++) {
+                starsVertices.push((Math.random() - 0.5) * 3000, (Math.random() - 0.5) * 3000, (Math.random() - 0.5) * 3000);
+            }
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+            scene.add(new THREE.Points(starsGeometry, starsMaterial));
 
-                void main() {
-                    vec2 coord = vUv * 5.0;
-                    float speed = time * 0.1;
-                    vec3 col = vec3(0.0);
-                    
-                    // Слои туманностей
-                    col += vec3(0.1, 0.0, 0.2) * noise(vec3(coord, speed));
-                    col += vec3(0.0, 0.05, 0.15) * noise(vec3(coord + 10.0, speed * 1.5));
-                    
-                    // Звезды
-                    if (noise(vec3(coord * 50.0, 0.0)) > 0.8) {
-                        col += vec3(0.8, 0.8, 1.0) * pow(noise(vec3(coord * 50.0 + time, 0.0)), 10.0);
-                    }
-                    
-                    gl_FragColor = vec4(col, 1.0);
-                }
-            `;
-            const spaceGeom = new THREE.SphereGeometry(1000, 32, 32);
-            spaceShader = new THREE.ShaderMaterial({
-                vertexShader: spaceVertexShader,
-                fragmentShader: spaceFragmentShader,
-                uniforms: { time: { value: 0.0 } },
-                side: THREE.BackSide
-            });
-            scene.add(new THREE.Mesh(spaceGeom, spaceShader));
-
-            // --- ШЕЙДЕР СВЕЧЕНИЯ ПЛАНЕТ (GlowShader) ---
+            // --- ПЛАНЕТЫ (С добавлением свечения и траекторий) ---
             const glowVertexShader = `
                 varying vec3 vNormal;
                 varying vec3 vPositionNormal;
@@ -216,49 +220,49 @@
                 }
             `;
 
-            // ПЛАНЕТЫ (С добавлением свечения и траекторий)
             const pData = [
-                { n: 'Sun', r: 15, d: 200, c: 0xffcc00, g: 0xffffaa },
-                { n: 'Mars', r: 2, d: 40, c: 0xff4400, g: 0xffaaaa },
-                { n: 'Jupiter', r: 12, d: 90, c: 0xffaa88, g: 0xffccaa },
-                { n: 'Saturn', r: 10, d: 140, c: 0xeeeeaa, g: 0xffffcc }
+                { n: 'Солнце', r: 25, d: 250, c: 0xffcc00, g: 0xffffaa, speed: 0.001 },
+                { n: 'Марс', r: 2, d: 60, c: 0xff4400, g: 0xffaaaa, speed: 0.005 },
+                { n: 'Юпитер', r: 15, d: 130, c: 0xffaa88, g: 0xffccaa, speed: 0.002 },
+                { n: 'Сатурн', r: 12, d: 200, c: 0xeeeeaa, g: 0xffffcc, speed: 0.0015 }
             ];
 
             pData.forEach(p => {
                 const group = new THREE.Group();
                 
                 // Модель планеты
-                const meshMat = new THREE.MeshPhongMaterial({ color: p.c });
+                const meshMat = new THREE.MeshPhongMaterial({ color: p.c, shininess: 50 });
                 const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r, 32, 32), meshMat);
                 mesh.position.x = p.d;
+                mesh.name = p.n; // Уникальное имя для клика
                 
-                // Добавление свечения
+                // --- ШЕЙДЕРНОЕ СВЕЧЕНИЕ (Более надежное) ---
                 const glowMat = new THREE.ShaderMaterial({
                     vertexShader: glowVertexShader,
                     fragmentShader: glowFragmentShader,
                     uniforms: {
-                        c: { type: "f", value: 1.0 },
-                        p: { type: "f", value: 3.0 }, // Сила свечения
+                        c: { type: "f", value: 0.8 },
+                        p: { type: "f", value: 3.5 }, // Настройка силы
                         glowColor: { type: "c", value: new THREE.Color(p.g) }
                     },
                     side: THREE.BackSide,
                     blending: THREE.AdditiveBlending,
                     transparent: true
                 });
-                const glowMesh = new THREE.Mesh(new THREE.SphereGeometry(p.r * 1.2, 32, 32), glowMat); // Больше чем планета
+                const glowMesh = new THREE.Mesh(new THREE.SphereGeometry(p.r * 1.15, 32, 32), glowMat);
                 mesh.add(glowMesh);
 
                 group.add(mesh);
                 scene.add(group);
 
-                // --- ТРАЕКТОРИЯ ОРБИТЫ (Torus) ---
-                const trajectoryMat = new THREE.MeshBasicMaterial({ color: p.c, transparent: true, opacity: 0.1 });
-                const trajectoryGeom = new THREE.TorusGeometry(p.d, 0.1, 8, 100);
+                // --- ТРАЕКТОРИЯ ОРБИТЫ (Тонкая линия - Torus) ---
+                const trajectoryMat = new THREE.MeshBasicMaterial({ color: p.c, transparent: true, opacity: 0.15 });
+                const trajectoryGeom = new THREE.TorusGeometry(p.d, 0.05, 8, 200);
                 const trajectory = new THREE.Mesh(trajectoryGeom, trajectoryMat);
-                trajectory.rotation.x = Math.PI / 2; // Плоскость орбиты
+                trajectory.rotation.x = Math.PI / 2;
                 scene.add(trajectory);
 
-                planets.push({ mesh: group, speed: 0.002 / (p.d/50) });
+                planets.push({ mesh: group, planetMesh: mesh, speed: p.speed });
             });
 
             // МКС (Более видимая)
@@ -274,9 +278,9 @@
                 p.rotation.x = Math.PI/2;
                 issModel.add(p);
             }
-            // --- УВЕЛИЧЕННЫЙ МАСШТАБ И СОБСТВЕННЫЙ СВЕТ МКС ---
-            issModel.scale.set(0.45, 0.45, 0.45); // В 3 раза больше
-            const issLight = new THREE.PointLight(0x00f2ff, 1.0, 5); // Синее свечение
+            issModel.scale.set(0.6, 0.6, 0.6); // Увеличили еще больше
+            issModel.name = 'МКС'; // Имя для клика
+            const issLight = new THREE.PointLight(0x00f2ff, 1.5, 7); 
             issModel.add(issLight);
             
             scene.add(issModel);
@@ -291,7 +295,48 @@
             scene.add(userPin);
             userPin.visible = false; 
 
-            camera.position.set(10, 10, 20);
+            camera.position.set(10, 10, 25);
+            
+            // --- ПОДКЛЮЧЕНИЕ СЛУШАТЕЛЯ КЛИКОВ ---
+            window.addEventListener('click', onDocumentMouseDown, false);
+        }
+
+        // --- ЛОГИКА ОПРЕДЕЛЕНИЯ КЛИКА ПО ПЛАНЕТЕ (Raycaster) ---
+        function onDocumentMouseDown(event) {
+            // Нормализуем координаты мыши (от -1 до +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Обновляем Raycaster на основе позиции камеры и мыши
+            raycaster.setFromCamera(mouse, camera);
+
+            // Получаем список объектов, которые пересекает луч
+            const intersects = raycaster.intersectObjects(scene.children, true);
+
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                
+                // Если кликнули по МКС (ее сгруппированным частям)
+                if (obj.parent && obj.parent.name === 'МКС') obj = obj.parent;
+                // Если кликнули по Земле
+                if (obj.name === 'Земля') showPlanetCard(obj.name, "Ваша домашняя планета. Единственная известная планета, населенная живыми существами.");
+
+                // Ищем имя планеты в БД
+                if (planetInfoDB[obj.name]) {
+                    showPlanetCard(obj.name, planetInfoDB[obj.name]);
+                }
+            }
+        }
+
+        // --- ФУНКЦИИ КАРТОЧКИ (UI) ---
+        function showPlanetCard(name, desc) {
+            document.getElementById('planet-name').innerText = name;
+            document.getElementById('planet-desc').innerText = desc;
+            document.getElementById('planet-card').style.display = 'flex';
+        }
+
+        function closePlanetCard() {
+            document.getElementById('planet-card').style.display = 'none';
         }
 
         function requestNotifications() { Notification.requestPermission(); }
@@ -340,9 +385,6 @@
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
-            
-            // Обновление шейдера космоса (время)
-            spaceShader.uniforms.time.value += 0.01;
             
             planets.forEach(p => { p.mesh.rotation.y += p.speed; });
             currentISSParams.lat = THREE.MathUtils.lerp(currentISSParams.lat, targetISSParams.lat, lerpSpeed);
