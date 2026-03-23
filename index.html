@@ -8,7 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         :root {
-            --bg-color: #020205;
+            --bg-color: #010103;
             --text-color: #ffffff;
             --accent-color: #00f2ff;
             --font: 'Courier New', Courier, monospace;
@@ -107,26 +107,32 @@
     </main>
 
     <script>
-        let scene, camera, renderer, controls, earth, issModel, userMarker;
+        let scene, camera, renderer, controls, earth, issModel, userPin;
         let uLat = null, uLng = null;
         let notificationSent = false;
+        
+        // Переменные для плавного движения МКС
+        let targetISSParams = { lat: 0, lng: 0, alt: 420 };
+        let currentISSParams = { lat: 0, lng: 0, alt: 420 };
+        const lerpSpeed = 0.05; // Скорость сглаживания (0.01 - 0.1)
 
         function initScene() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-            // Интерактивность: вращение мышкой
+            // OrbitControls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.minDistance = 7;
-            controls.maxDistance = 30;
+            controls.maxDistance = 50;
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const sun = new THREE.DirectionalLight(0xffffff, 1);
-            sun.position.set(5, 3, 5);
+            // Освещение (улучшенное для реализма)
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+            sun.position.set(10, 5, 10);
             scene.add(sun);
 
             const loader = new THREE.TextureLoader();
@@ -136,41 +142,97 @@
             const earthMat = new THREE.MeshPhongMaterial({
                 map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
                 bumpMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
-                bumpScale: 0.05
+                bumpScale: 0.05,
+                specularMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg'),
+                specular: new THREE.Color('grey')
             });
             earth = new THREE.Mesh(earthGeom, earthMat);
             scene.add(earth);
 
             // Звезды
-            const starGeom = new THREE.SphereGeometry(80, 32, 32);
+            const starGeom = new THREE.SphereGeometry(150, 32, 32);
             const starMat = new THREE.MeshBasicMaterial({
                 map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'),
                 side: THREE.BackSide
             });
             scene.add(new THREE.Mesh(starGeom, starMat));
 
-            // Модель МКС
+            // --- СУПЕР РЕАЛИСТИЧНАЯ МОДЕЛЬ МКС (Procedural) ---
             issModel = new THREE.Group();
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6), new THREE.MeshStandardMaterial({color: 0xcccccc}));
-            body.rotation.z = Math.PI/2;
-            const panelGeom = new THREE.PlaneGeometry(0.7, 0.25);
-            const panelMat = new THREE.MeshStandardMaterial({color: 0xffaa00, side: THREE.DoubleSide, metalness: 0.8});
-            for(let i=0; i<4; i++) {
-                const p = new THREE.Mesh(panelGeom, panelMat);
-                p.position.set((i < 2 ? -0.3 : 0.3), (i % 2 === 0 ? 0.2 : -0.2), 0);
+            
+            // Материалы
+            const matMtl = new THREE.MeshStandardMaterial({color: 0xaaaaaa, metalness: 0.8, roughness: 0.2}); // Металл
+            const matPan = new THREE.MeshStandardMaterial({color: 0xb37a1a, metalness: 0.5, roughness: 0.5, side: THREE.DoubleSide}); // Панели (золото/бронза)
+            const matRad = new THREE.MeshStandardMaterial({color: 0xdddddd, metalness: 0.1, roughness: 0.8}); // Радиаторы (белый)
+
+            // 1. Центральная ферма (Truss)
+            const trussG = new THREE.CylinderGeometry(0.02, 0.02, 2, 6);
+            const truss = new THREE.Mesh(trussG, matMtl);
+            truss.rotation.z = Math.PI/2;
+            issModel.add(truss);
+
+            // 2. Основные солнечные панели (8 штук)
+            const panelG = new THREE.PlaneGeometry(0.9, 0.3);
+            for(let i=0; i<8; i++) {
+                const p = new THREE.Mesh(panelG, matPan);
+                const side = (i < 4) ? -1 : 1;
+                const offset = (i % 4) * 0.25;
+                p.position.set(side * (0.4 + offset), 0, 0.1 * (i%2 === 0 ? 1 : -1));
+                p.rotation.x = Math.PI/2;
                 issModel.add(p);
             }
-            issModel.add(body);
+
+            // 3. Жилые и лабораторные модули (Центр)
+            const modulesG = new THREE.Group();
+            const nodeG = new THREE.CylinderGeometry(0.12, 0.12, 0.3, 12);
+            const node = new THREE.Mesh(nodeG, matMtl);
+            node.rotation.x = Math.PI/2;
+            modulesG.add(node);
+
+            const labG = new THREE.CylinderGeometry(0.1, 0.1, 0.5, 12);
+            const lab = new THREE.Mesh(labG, matMtl);
+            lab.position.set(0, 0, 0.3);
+            lab.rotation.x = Math.PI/2;
+            modulesG.add(lab);
+            
+            const cupolaG = new THREE.SphereGeometry(0.06, 12, 12, 0, Math.PI*2, 0, Math.PI/2);
+            const cupola = new THREE.Mesh(cupolaG, matMtl);
+            cupola.position.set(0, -0.1, 0.35);
+            modulesG.add(cupola);
+
+            issModel.add(modulesG);
+
+            // 4. Радиаторы (Поперек фермы)
+            const radG = new THREE.PlaneGeometry(0.15, 0.8);
+            const r1 = new THREE.Mesh(radG, matRad);
+            r1.position.set(-0.2, 0, 0);
+            issModel.add(r1);
+            const r2 = r1.clone();
+            r2.position.set(0.2, 0, 0);
+            issModel.add(r2);
+
             scene.add(issModel);
 
-            // Ваш маркер (сделал больше и ярче)
-            userMarker = new THREE.Mesh(
-                new THREE.SphereGeometry(0.12, 16, 16),
-                new THREE.MeshBasicMaterial({color: 0xff0000, transparent: true, opacity: 0.8})
-            );
-            scene.add(userMarker);
+            // --- МАРКЕР ПОЛЬЗОВАТЕЛЯ: КРАСНАЯ БУЛАВКА ---
+            userPin = new THREE.Group();
+            
+            // Ножка булавки (Конус острым концом вниз)
+            const pinLegG = new THREE.ConeGeometry(0.04, 0.3, 12);
+            const pinLegM = new THREE.MeshBasicMaterial({color: 0xff0000});
+            const pinLeg = new THREE.Mesh(pinLegG, pinLegM);
+            pinLeg.position.y = 0.15; // Поднимаем, чтобы острый конец был в 0
+            userPin.add(pinLeg);
 
-            camera.position.set(0, 5, 15);
+            // Головка булавки (Сфера сверху)
+            const pinHeadG = new THREE.SphereGeometry(0.08, 16, 16);
+            const pinHeadM = new THREE.MeshBasicMaterial({color: 0xff0000});
+            const pinHead = new THREE.Mesh(pinHeadG, pinHeadM);
+            pinHead.position.y = 0.3; // Ставим на вершину конуса
+            userPin.add(pinHead);
+
+            scene.add(userPin);
+
+            camera.position.set(0, 5, 18);
         }
 
         function requestNotifications() {
@@ -192,9 +254,15 @@
                 uLat = p.coords.latitude;
                 uLng = p.coords.longitude;
                 document.getElementById('u-coords').innerText = `${uLat.toFixed(2)}°N, ${uLng.toFixed(2)}°E`;
-                mapToSphere(userMarker, uLat, uLng, 5.08);
-                // Фокусируем камеру на пользователе при загрузке
-                camera.position.set(userMarker.position.x * 2, userMarker.position.y * 2, userMarker.position.z * 2);
+                
+                // Устанавливаем булавку острием на поверхность Земли
+                mapToSphere(userPin, uLat, uLng, 5); 
+                // Ориентируем булавку вертикально вверх от центра Земли
+                userPin.lookAt(userPin.position.clone().multiplyScalar(2));
+                userPin.rotateX(Math.PI/2); 
+
+                // Фокусируем камеру
+                camera.position.set(userPin.position.x * 2, userPin.position.y * 2, userPin.position.z * 2);
                 controls.update();
                 document.getElementById('load-status').innerText = "Координаты получены";
             }, () => {
@@ -229,8 +297,16 @@
                 document.getElementById('lat-iss').innerText = data.latitude.toFixed(2);
                 document.getElementById('lng-iss').innerText = data.longitude.toFixed(2);
 
-                mapToSphere(issModel, data.latitude, data.longitude, 6.8);
-                issModel.lookAt(0,0,0);
+                // Устанавливаем ЦЕЛЕВЫЕ параметры для плавного движения
+                targetISSParams.lat = data.latitude;
+                targetISSParams.lng = data.longitude;
+                targetISSParams.alt = data.altitude;
+
+                // Инициализация текущей позиции при первом запуске
+                if(currentISSParams.lat === 0) {
+                    currentISSParams.lat = targetISSParams.lat;
+                    currentISSParams.lng = targetISSParams.lng;
+                }
 
                 if (uLat !== null) {
                     const d = calcDist(uLat, uLng, data.latitude, data.longitude, data.altitude);
@@ -247,7 +323,6 @@
                     }
                 }
                 
-                // Скрываем экран загрузки после получения первых данных
                 const loader = document.getElementById('loading-screen');
                 if (loader.style.opacity !== "0") {
                     loader.style.opacity = "0";
@@ -256,16 +331,39 @@
             } catch (e) { console.warn("Связь потеряна"); }
         }
 
+        // Вспомогательная функция для плавного перехода углов (учитывает переход через 180/-180)
+        function lerpAngle(a, b, t) {
+            let d = b - a;
+            if (d > 180) d -= 360;
+            if (d < -180) d += 360;
+            return a + d * t;
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
+
+            // --- РЕАЛИЗАЦИЯ ПЛАВНОГО ДВИЖЕНИЯ МКС ---
+            // Применяем LERP (линейную интерполяцию) к текущим координатам
+            currentISSParams.lat = THREE.MathUtils.lerp(currentISSParams.lat, targetISSParams.lat, lerpSpeed);
+            currentISSParams.lng = lerpAngle(currentISSParams.lng, targetISSParams.lng, lerpSpeed); // Используем lerpAngle для долготы
+
+            // Обновляем позицию модели на 3D-сфере на основе сглаженных координат
+            const orbitRadius = 5 + (targetISSParams.alt / 6371 * 5); // Масштабируем высоту
+            mapToSphere(issModel, currentISSParams.lat, currentISSParams.lng, orbitRadius);
+            
+            // Ориентируем МКС по вектору движения (нос к центру Земли + наклон по орбите)
+            const forwardVec = issModel.position.clone().normalize();
+            issModel.lookAt(0,0,0);
+            issModel.rotateY(Math.PI/2); // Коррекция ориентации модели
+
             renderer.render(scene, camera);
             document.getElementById('time').innerText = new Date().toLocaleTimeString();
         }
 
         initScene();
         animate();
-        setInterval(updateISS, 3000);
+        setInterval(updateISS, 3000); // API обновляется раз в 3 сек
         updateISS();
 
         window.onresize = () => {
