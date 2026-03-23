@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ОРБИТА | Система Слежения</title>
+    <title>ОРБИТА | Глобальный Мониторинг</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         :root {
-            --bg-color: #010103;
+            --bg-color: #020205;
             --text-color: #ffffff;
             --accent-color: #00f2ff;
             --font: 'Courier New', Courier, monospace;
         }
 
         body.iss-overhead {
-            --bg-color: #f0f2f5;
-            --text-color: #050505;
+            --bg-color: #f5f5f7;
+            --text-color: #000000;
             --accent-color: #ff0055;
         }
 
@@ -26,12 +26,12 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             font-family: var(--font);
-            transition: background 2s, color 1s;
+            transition: background 1.5s ease-in-out, color 1s;
         }
 
         #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
 
-        .ui-panel {
+        .ui {
             position: relative; z-index: 10;
             height: 100vh; display: flex;
             flex-direction: column; justify-content: space-between;
@@ -40,30 +40,27 @@
         }
 
         .header { pointer-events: auto; }
-        .clock { font-size: 5rem; font-weight: 100; letter-spacing: -5px; margin: 0; }
-        .label { font-size: 0.75rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; }
+        .clock { font-size: 4rem; letter-spacing: -3px; margin: 0; font-weight: 100; }
+        .label { font-size: 0.7rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 2px; }
 
-        .stats-container {
-            display: flex; gap: 60px; pointer-events: auto;
-            background: rgba(0,0,0,0.4); backdrop-filter: blur(10px);
-            padding: 20px; border-left: 3px solid var(--accent-color);
-            width: fit-content;
+        .telemetry {
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(15px);
+            padding: 25px; border-left: 2px solid var(--accent-color);
+            width: fit-content; pointer-events: auto;
         }
 
-        .stat-item { display: flex; flex-direction: column; }
-        .stat-val { font-size: 1.8rem; color: var(--accent-color); }
+        .dist-box { margin-bottom: 20px; }
+        .dist-val { font-size: 2.5rem; color: var(--accent-color); }
 
-        .user-loc { position: absolute; top: 40px; right: 40px; text-align: right; }
-        
-        #distance-alert {
-            font-size: 1.2rem; margin-top: 10px;
-            animation: pulse 2s infinite;
+        .user-tag {
+            position: absolute; top: 40px; right: 40px; text-align: right;
+            border-right: 2px solid var(--accent-color); padding-right: 15px;
         }
 
-        @keyframes pulse {
-            0% { opacity: 0.5; }
-            50% { opacity: 1; }
-            100% { opacity: 0.5; }
+        #status-light {
+            width: 10px; height: 10px; border-radius: 50%;
+            display: inline-block; background: var(--accent-color);
+            margin-right: 10px; box-shadow: 0 0 10px var(--accent-color);
         }
     </style>
 </head>
@@ -71,96 +68,103 @@
 
     <div id="canvas-container"></div>
 
-    <main class="ui-panel">
-        <div class="user-loc">
-            <span class="label">Ваши координаты</span><br>
-            <span id="user-coords">ОПРЕДЕЛЕНИЕ...</span>
+    <main class="ui">
+        <div class="user-tag">
+            <span class="label">Ваш сектор</span><br>
+            <span id="u-coords">ОПРЕДЕЛЕНИЕ...</span>
         </div>
 
         <section class="header">
+            <div id="status-line"><span id="status-light"></span><span class="label">СИСТЕМА СИНХРОНИЗИРОВАНА</span></div>
             <h1 id="time" class="clock">00:00:00</h1>
-            <p class="label">Дистанция до МКС:</p>
-            <div id="distance-val" style="font-size: 3rem; color: var(--accent-color);">--- КМ</div>
-            <div id="location-text">ОЖИДАНИЕ ТЕЛЕМЕТРИИ...</div>
+            <p id="overhead-msg" style="margin-top: 10px; font-weight: bold;">МКС ВНЕ ЗОНЫ ДОСЯГАЕМОСТИ</p>
         </section>
 
-        <section class="stats-container">
-            <div class="stat-item">
-                <span class="label">Широта ISS</span>
-                <span id="iss-lat" class="stat-val">0.00</span>
+        <section class="telemetry">
+            <div class="dist-box">
+                <span class="label">Дистанция до цели</span>
+                <div id="distance" class="dist-val">--- КМ</div>
             </div>
-            <div class="stat-item">
-                <span class="label">Долгота ISS</span>
-                <span id="iss-lng" class="stat-val">0.00</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Скорость</span>
-                <span class="stat-val">27,600 км/ч</span>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div><span class="label">LAT ISS</span><br><span id="lat-iss">0.00</span></div>
+                <div><span class="label">LNG ISS</span><br><span id="lng-iss">0.00</span></div>
             </div>
         </section>
     </main>
 
     <script>
-        let scene, camera, renderer, earth, issGroup, userMarker;
-        let userLat = null, userLng = null;
+        let scene, camera, renderer, earth, issModel, userMarker;
+        let uLat = null, uLng = null;
 
-        function init3D() {
+        function initScene() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // Освещение
-            const ambient = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(ambient);
-            const sun = new THREE.PointLight(0xffffff, 1);
-            sun.position.set(20, 10, 20);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 1);
+            sun.position.set(5, 3, 5);
             scene.add(sun);
 
-            // Создание Земли с текстурой карты
-            const earthGeom = new THREE.SphereGeometry(5, 64, 64);
+            // Земля
             const loader = new THREE.TextureLoader();
-            // Используем публичную текстуру карты мира
-            const earthTex = loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
-            const earthMat = new THREE.MeshPhongMaterial({ map: earthTex, bumpScale: 0.05 });
+            const earthGeom = new THREE.SphereGeometry(5, 64, 64);
+            const earthMat = new THREE.MeshPhongMaterial({
+                map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
+                bumpMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
+                bumpScale: 0.05
+            });
             earth = new THREE.Mesh(earthGeom, earthMat);
             scene.add(earth);
 
-            // Звезды
-            const starGeom = new THREE.SphereGeometry(90, 32, 32);
+            // Звездный фон
+            const starGeom = new THREE.SphereGeometry(80, 32, 32);
             const starMat = new THREE.MeshBasicMaterial({
                 map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'),
                 side: THREE.BackSide
             });
             scene.add(new THREE.Mesh(starGeom, starMat));
 
-            // Модель МКС
-            issGroup = new THREE.Group();
-            const core = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5), new THREE.MeshBasicMaterial({color: 0x00f2ff}));
-            core.rotation.z = Math.PI/2;
-            const panels = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshBasicMaterial({color: 0xffffff, side: THREE.DoubleSide, wireframe: true}));
-            issGroup.add(core, panels);
-            scene.add(issGroup);
+            // Модель МКС (Сборная)
+            issModel = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6), new THREE.MeshStandardMaterial({color: 0xcccccc}));
+            body.rotation.z = Math.PI/2;
+            
+            // Солнечные панели (Золотистые)
+            const panelGeom = new THREE.PlaneGeometry(0.7, 0.25);
+            const panelMat = new THREE.MeshStandardMaterial({color: 0xffaa00, side: THREE.DoubleSide, metalness: 0.8, roughness: 0.2});
+            for(let i=0; i<4; i++) {
+                const p = new THREE.Mesh(panelGeom, panelMat);
+                p.position.set((i < 2 ? -0.3 : 0.3), (i % 2 === 0 ? 0.2 : -0.2), 0);
+                issModel.add(p);
+            }
+            issModel.add(body);
+            scene.add(issModel);
 
             // Маркер пользователя
-            userMarker = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xff0000}));
+            userMarker = new THREE.Mesh(
+                new THREE.SphereGeometry(0.06, 16, 16),
+                new THREE.MeshBasicMaterial({color: 0xff0000})
+            );
             scene.add(userMarker);
 
             camera.position.z = 15;
         }
 
-        // Получение геолокации пользователя
+        // Геолокация
         if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(pos => {
-                userLat = pos.coords.latitude;
-                userLng = pos.coords.longitude;
-                document.getElementById('user-coords').innerText = `${userLat.toFixed(2)}, ${userLng.toFixed(2)}`;
-                updateMarker(userMarker, userLat, userLng, 5.05);
+            navigator.geolocation.getCurrentPosition(p => {
+                uLat = p.coords.latitude;
+                uLng = p.coords.longitude;
+                document.getElementById('u-coords').innerText = `${uLat.toFixed(2)}°N, ${uLng.toFixed(2)}°E`;
+                mapToSphere(userMarker, uLat, uLng, 5.05);
             });
         }
 
-        function updateMarker(obj, lat, lng, radius) {
+        function mapToSphere(obj, lat, lng, radius) {
             const phi = (90 - lat) * (Math.PI / 180);
             const theta = (lng + 180) * (Math.PI / 180);
             obj.position.set(
@@ -170,17 +174,13 @@
             );
         }
 
-        // Расчет дистанции (Формула Гаверсинуса + высота)
-        function calculateDistance(lat1, lon1, lat2, lon2, alt2) {
-            const R = 6371; // Радиус Земли
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const surfaceDist = R * c;
-            // Учитываем высоту МКС через теорему Пифагора (приблизительно)
-            return Math.sqrt(Math.pow(surfaceDist, 2) + Math.pow(alt2, 2));
+        function calcDist(lat1, lon1, lat2, lon2, alt) {
+            const R = 6371; 
+            const dLat = (lat2-lat1) * Math.PI/180;
+            const dLon = (lon2-lon1) * Math.PI/180;
+            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+            const surfaceDist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return Math.sqrt(surfaceDist**2 + alt**2);
         }
 
         async function updateISS() {
@@ -188,35 +188,35 @@
                 const res = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
                 const data = await res.json();
                 
-                document.getElementById('iss-lat').innerText = data.latitude.toFixed(2);
-                document.getElementById('iss-lng').innerText = data.longitude.toFixed(2);
+                document.getElementById('lat-iss').innerText = data.latitude.toFixed(2);
+                document.getElementById('lng-iss').innerText = data.longitude.toFixed(2);
 
-                updateMarker(issGroup, data.latitude, data.longitude, 7);
-                issGroup.lookAt(0,0,0);
+                mapToSphere(issModel, data.latitude, data.longitude, 6.8); // Орбита чуть выше земли
+                issModel.lookAt(0,0,0);
 
-                if (userLat !== null) {
-                    const dist = calculateDistance(userLat, userLng, data.latitude, data.longitude, data.altitude);
-                    document.getElementById('distance-val').innerText = Math.round(dist) + " КМ";
+                if (uLat !== null) {
+                    const d = calcDist(uLat, uLng, data.latitude, data.longitude, data.altitude);
+                    document.getElementById('distance').innerText = Math.round(d) + " КМ";
                     
-                    if (dist < 1000) {
+                    if (d < 1200) {
                         document.body.classList.add('iss-overhead');
-                        document.getElementById('location-text').innerText = "МКС В ЗОНЕ ПРЯМОЙ ВИДИМОСТИ";
+                        document.getElementById('overhead-msg').innerText = "ВНИМАНИЕ: МКС В СЕКТОРЕ ВИДИМОСТИ";
                     } else {
                         document.body.classList.remove('iss-overhead');
-                        document.getElementById('location-text').innerText = "МКС ЗА ГОРИЗОНТОМ";
+                        document.getElementById('overhead-msg').innerText = "МКС ЗА ГОРИЗОНТОМ";
                     }
                 }
-            } catch (e) { console.log("Lost link..."); }
+            } catch (e) { console.warn("Сигнал потерян"); }
         }
 
         function animate() {
             requestAnimationFrame(animate);
-            earth.rotation.y += 0.0005;
+            earth.rotation.y += 0.0003;
             renderer.render(scene, camera);
             document.getElementById('time').innerText = new Date().toLocaleTimeString();
         }
 
-        init3D();
+        initScene();
         animate();
         setInterval(updateISS, 3000);
         updateISS();
