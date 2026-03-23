@@ -107,7 +107,7 @@
     </main>
 
     <script>
-        let scene, camera, renderer, controls, earth, issModel, userPin;
+        let scene, camera, renderer, controls, earth, issModel, userPin, sun;
         let uLat = null, uLng = null;
         let notificationSent = false;
         
@@ -116,9 +116,12 @@
         let currentISSParams = { lat: 0, lng: 0, alt: 420 };
         const lerpSpeed = 0.05; // Скорость сглаживания (0.01 - 0.1)
 
+        // Массив для хранения планет Солнечной системы
+        let planets = [];
+
         function initScene() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
@@ -127,35 +130,87 @@
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.minDistance = 7;
-            controls.maxDistance = 50;
+            controls.maxDistance = 1000; // Увеличили дистанцию, чтобы видеть всю систему
 
             // Освещение (улучшенное для реализма)
-            scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-            const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-            sun.position.set(10, 5, 10);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.1)); // Очень слабый эмбиент для теней
+            
+            // Основной источник света - СОЛНЦЕ (PointLight)
+            sun = new THREE.PointLight(0xffffff, 2, 2000);
+            sun.position.set(0, 0, 0); // Солнце в центре системы планет, но Землю мы оставим в центре сцены для трекинга.
+            // Чтобы Солнце освещало Землю, мы вынесем его далеко
+            sun.position.set(200, 50, 200);
             scene.add(sun);
 
             const loader = new THREE.TextureLoader();
             
-            // Земля
+            // Земля (Оставляем в центре сцены)
             const earthGeom = new THREE.SphereGeometry(5, 64, 64);
             const earthMat = new THREE.MeshPhongMaterial({
                 map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg'),
                 bumpMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg'),
                 bumpScale: 0.05,
-                specularMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg'),
-                specular: new THREE.Color('grey')
+                specularMap: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_specular_2048.png'),
+                specular: new THREE.Color('grey'),
+                shininess: 10
             });
             earth = new THREE.Mesh(earthGeom, earthMat);
             scene.add(earth);
 
             // Звезды
-            const starGeom = new THREE.SphereGeometry(150, 32, 32);
+            const starGeom = new THREE.SphereGeometry(1500, 32, 32);
             const starMat = new THREE.MeshBasicMaterial({
                 map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'),
                 side: THREE.BackSide
             });
             scene.add(new THREE.Mesh(starGeom, starMat));
+
+            // --- ДОБАВЛЕНИЕ ПЛАНЕТ СОЛНЕЧНОЙ СИСТЕМЫ (Масштабы соблюдены, расстояния сжаты) ---
+            const planetData = [
+                { name: 'Sun', radius: 25, dist: 300, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/sun_texture.jpg', type: 'basic' },
+                { name: 'Mercury', radius: 1.5, dist: 40, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mercury_texture.jpg' },
+                { name: 'Venus', radius: 3.5, dist: 60, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/venus_texture.jpg' },
+                // Земля уже в центре сцены
+                { name: 'Mars', radius: 2.5, dist: 100, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mars_texture.jpg' },
+                { name: 'Jupiter', radius: 20, dist: 180, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/jupiter_texture.jpg' },
+                { name: 'Saturn', radius: 17, dist: 250, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/saturn_texture.jpg', ring: true },
+                { name: 'Uranus', radius: 12, dist: 320, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/uranus_texture.jpg' },
+                { name: 'Neptune', radius: 11, dist: 380, texture: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/neptune_texture.jpg' }
+            ];
+
+            planetData.forEach(data => {
+                const geom = new THREE.SphereGeometry(data.radius, 32, 32);
+                let mat;
+                if (data.type === 'basic') {
+                    // Солнце светится само
+                    mat = new THREE.MeshBasicMaterial({ map: loader.load(data.texture) });
+                } else {
+                    mat = new THREE.MeshPhongMaterial({ map: loader.load(data.texture), shininess: 0 });
+                }
+                const planet = new THREE.Mesh(geom, mat);
+                
+                // Создаем группу для орбиты (чтобы вращать вокруг Земли)
+                const orbitGroup = new THREE.Group();
+                orbitGroup.add(planet);
+                
+                // Устанавливаем начальную позицию (расстояние от Земли)
+                planet.position.x = data.dist;
+                
+                // Добавляем кольца Сатурну
+                if (data.ring) {
+                    const ringGeom = new THREE.TorusGeometry(data.radius * 1.4, 1.5, 2, 100);
+                    const ringMat = new THREE.MeshPhongMaterial({ map: loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/saturn_ring_alpha.png'), side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+                    const ring = new THREE.Mesh(ringGeom, ringMat);
+                    ring.rotation.x = Math.PI / 2.2;
+                    planet.add(ring);
+                }
+
+                scene.add(orbitGroup);
+                planets.push({ mesh: orbitGroup, dist: data.dist, speed: 0.005 / (data.dist/50) }); // Скорость вращения зависит от дистанции
+                
+                if (data.name === 'Sun') sun.position.set(orbitGroup.position.x + data.dist, 50, orbitGroup.position.z + data.dist); // Привязываем свет к Солнцу
+            });
+
 
             // --- СУПЕР РЕАЛИСТИЧНАЯ МОДЕЛЬ МКС (Procedural) ---
             issModel = new THREE.Group();
@@ -211,6 +266,9 @@
             r2.position.set(0.2, 0, 0);
             issModel.add(r2);
 
+            // --- ИСПРАВЛЕНИЕ МАСШТАБА МКС ---
+            issModel.scale.set(0.1, 0.1, 0.1); // Уменьшаем модель в 10 раз, чтобы она стала реалистичной точкой
+
             scene.add(issModel);
 
             // --- МАРКЕР ПОЛЬЗОВАТЕЛЯ: КРАСНАЯ БУЛАВКА ---
@@ -232,7 +290,7 @@
 
             scene.add(userPin);
 
-            camera.position.set(0, 5, 18);
+            camera.position.set(0, 5, 25); // Чуть отдалили камеру по умолчанию
         }
 
         function requestNotifications() {
@@ -262,7 +320,7 @@
                 userPin.rotateX(Math.PI/2); 
 
                 // Фокусируем камеру
-                camera.position.set(userPin.position.x * 2, userPin.position.y * 2, userPin.position.z * 2);
+                camera.position.set(userPin.position.x * 2.5, userPin.position.y * 2.5, userPin.position.z * 2.5);
                 controls.update();
                 document.getElementById('load-status').innerText = "Координаты получены";
             }, () => {
@@ -314,7 +372,7 @@
                     
                     if (d < 1200) {
                         document.body.classList.add('iss-overhead');
-                        document.getElementById('overhead-msg').innerText = "МКС В ЗОНЕ ПРЯМОЙ ВИДИМОСТИ";
+                        document.getElementById('overhead-msg').innerText = "ВНИМАНИЕ: МКС В ЗОНЕ ПРЯМОЙ ВИДИМОСТИ";
                         sendNotification(d);
                     } else {
                         document.body.classList.remove('iss-overhead');
@@ -343,17 +401,34 @@
             requestAnimationFrame(animate);
             controls.update();
 
+            // Медленное вращение Земли для реализма
+            earth.rotation.y += 0.0002;
+
+            // --- ВРАЩЕНИЕ ПЛАНЕТ СОЛНЕЧНОЙ СИСТЕМЫ ВОКРУГ ЗЕМЛИ ---
+            planets.forEach(pData => {
+                pData.mesh.rotation.y += pData.speed; // Вращаем орбитальную группу планеты
+            });
+
+
             // --- РЕАЛИЗАЦИЯ ПЛАВНОГО ДВИЖЕНИЯ МКС ---
             // Применяем LERP (линейную интерполяцию) к текущим координатам
             currentISSParams.lat = THREE.MathUtils.lerp(currentISSParams.lat, targetISSParams.lat, lerpSpeed);
             currentISSParams.lng = lerpAngle(currentISSParams.lng, targetISSParams.lng, lerpSpeed); // Используем lerpAngle для долготы
 
-            // Обновляем позицию модели на 3D-сфере на основе сглаженных координат
-            const orbitRadius = 5 + (targetISSParams.alt / 6371 * 5); // Масштабируем высоту
+            // --- ИСПРАВЛЕНИЕ ОРБИТЫ МКС (ЧТОБЫ НЕ ВРЕЗАЛАСЬ) ---
+            // Вычисляем радиус орбиты: Радиус Земли (5) + Высота МКС (масштабированная)
+            // Реальная высота ~420 км при радиусе Земли ~6371 км. Масштаб высоты в 3D: (420 / 6371) * 5.
+            // Добавим небольшой множитель (например, * 1.5), чтобы орбита была заметно выше поверхности.
+            const baseEarthRadius = 5;
+            const realAltitudeKm = targetISSParams.alt;
+            const earthRadiusKm = 6371;
+            const scaledAltitude = (realAltitudeKm / earthRadiusKm) * baseEarthRadius * 2.5; // Увеличили высоту для наглядности
+            const orbitRadius = baseEarthRadius + scaledAltitude;
+
+            // Обновляем позицию модели на 3D-сфере на основе сглаженных координат и новой высоты
             mapToSphere(issModel, currentISSParams.lat, currentISSParams.lng, orbitRadius);
             
-            // Ориентируем МКС по вектору движения (нос к центру Земли + наклон по орбите)
-            const forwardVec = issModel.position.clone().normalize();
+            // Ориентируем МКС по вектору движения
             issModel.lookAt(0,0,0);
             issModel.rotateY(Math.PI/2); // Коррекция ориентации модели
 
