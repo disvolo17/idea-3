@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit Insight | Deep Space Interface</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;300;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #020205;
+            --text-color: #ffffff;
+            --accent-color: #00f2ff;
+            --secondary-color: rgba(255, 255, 255, 0.1);
+            --transition-speed: 2s;
+        }
+
+        body.iss-overhead {
+            --bg-color: #e8e8f0;
+            --text-color: #0a0a0a;
+            --accent-color: #ff3e3e;
+            --secondary-color: rgba(0, 0, 0, 0.05);
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', monospace;
+            transition: background-color var(--transition-speed), color var(--transition-speed);
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+        }
+
+        .interface {
+            position: relative;
+            z-index: 10;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            padding: 40px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            pointer-events: auto;
+        }
+
+        .sidebar {
+            border-left: 1px solid var(--secondary-color);
+            padding-left: 30px;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        h1 {
+            font-size: 5rem;
+            margin: 0;
+            font-weight: 100;
+            letter-spacing: -5px;
+        }
+
+        .status-msg {
+            font-size: 1.1rem;
+            max-width: 500px;
+            line-height: 1.8;
+            margin-top: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .highlight {
+            color: var(--accent-color);
+            border-bottom: 1px solid var(--accent-color);
+            transition: color 0.5s;
+        }
+
+        .event-list { margin-top: 40px; }
+        .event-item {
+            padding: 15px 0;
+            border-bottom: 1px solid var(--secondary-color);
+        }
+        .event-time { font-size: 0.8rem; color: var(--accent-color); }
+
+        /* Элементы HUD */
+        .hud-corner {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            text-align: right;
+            font-size: 0.7rem;
+            opacity: 0.6;
+        }
+
+        button {
+            background: none;
+            border: 1px solid var(--text-color);
+            color: var(--text-color);
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.3s;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background: var(--text-color);
+            color: var(--bg-color);
+        }
+
+        #noise-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: url('https://grainy-gradients.vercel.app/noise.svg');
+            opacity: 0.05;
+            pointer-events: none;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="noise-overlay"></div>
+    <div id="canvas-container"></div>
+
+    <div class="hud-corner">
+        SYSTEM_STATUS: NOMINAL<br>
+        CONNECTION: SECURE<br>
+        DATA_STREAM: ISS_LIVE_V1
+    </div>
+
+    <div class="interface">
+        <div class="main-content">
+            <h1 id="clock">00:00</h1>
+            <p class="status-msg">
+                Объект МКС сейчас проходит над <span class="highlight" id="region">заданными координатами</span>. 
+                Ваша текущая задача: <span class="highlight">Глубокое погружение в код</span>. 
+                До следующего окна видимости: <span id="countdown">--:--</span>.
+            </p>
+            <div id="audio-control">
+                <button onclick="toggleAudio()">INITIATE AUDIO ATMOSPHERE</button>
+            </div>
+        </div>
+
+        <aside class="sidebar">
+            <div class="event-list">
+                <div class="event-item">
+                    <span class="event-time">14:00 — 16:00</span><br>
+                    CONCENTRATION PHASE
+                </div>
+                <div class="event-item">
+                    <span class="event-time">18:30 — 19:00</span><br>
+                    ORBITAL REFLECTION (ISS PASS)
+                </div>
+            </div>
+            
+            <div class="telemetry">
+                <p style="font-size: 0.7rem; opacity: 0.5;">REAL-TIME TELEMETRY</p>
+                LAT: <span id="lat">0.00</span><br>
+                LNG: <span id="lng">0.00</span><br>
+                VELOCITY: 27,600 KM/H
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        let scene, camera, renderer, earth, clouds, stars;
+        let audioCtx, oscillator;
+
+        // --- ГРАФИЧЕСКИЙ ДВИЖОК ---
+        function initSpace() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Звездная пыль
+            const starGeom = new THREE.BufferGeometry();
+            const starCoords = [];
+            for(let i=0; i<5000; i++) {
+                starCoords.push((Math.random()-0.5)*2000, (Math.random()-0.5)*2000, (Math.random()-0.5)*2000);
+            }
+            starGeom.setAttribute('position', new THREE.Float32BufferAttribute(starCoords, 3));
+            stars = new THREE.Points(starGeom, new THREE.PointsMaterial({color: 0xffffff, size: 0.7}));
+            scene.add(stars);
+
+            // Планета (Wireframe High-Poly)
+            const earthGeom = new THREE.SphereGeometry(5, 50, 50);
+            const earthMat = new THREE.MeshPhongMaterial({
+                color: 0x00f2ff,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.15
+            });
+            earth = new THREE.Mesh(earthGeom, earthMat);
+            scene.add(earth);
+
+            // Атмосферное свечение
+            const light = new THREE.PointLight(0xffffff, 1.2);
+            light.position.set(10, 10, 10);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040));
+
+            camera.position.z = 15;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            earth.rotation.y += 0.0005;
+            stars.rotation.y -= 0.0001;
+            renderer.render(scene, camera);
+        }
+
+        // --- ЗВУКОВОЙ ДВИЖОК (Deep Space Ambient) ---
+        function toggleAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(110, audioCtx.currentTime); // Низкий гул
+                
+                gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime);
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                oscillator.start();
+                document.querySelector('#audio-control button').innerText = "AUDIO ACTIVE";
+            } else {
+                audioCtx.state === 'running' ? audioCtx.suspend() : audioCtx.resume();
+            }
+        }
+
+        // --- ТРЕКИНГ МКС ---
+        async function fetchISS() {
+            try {
+                const res = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+                const data = await res.json();
+                
+                document.getElementById('lat').innerText = data.latitude.toFixed(4);
+                document.getElementById('lng').innerText = data.longitude.toFixed(4);
+
+                // Эффект смены темы (если МКС в северном полушарии — пример условия)
+                if (data.latitude > 45) {
+                    document.body.classList.add('iss-overhead');
+                    document.getElementById('region').innerText = "СЕВЕРНЫМИ ШИРОТАМИ";
+                    playAlertBeep();
+                } else {
+                    document.body.classList.remove('iss-overhead');
+                    document.getElementById('region').innerText = "ОКЕАНОМ";
+                }
+            } catch (err) { console.log("Signal lost..."); }
+        }
+
+        function playAlertBeep() {
+            if (audioCtx && audioCtx.state === 'running') {
+                const b = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                b.type = 'square';
+                b.frequency.setValueAtTime(880, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+                b.connect(g); g.connect(audioCtx.destination);
+                b.start(); b.stop(audioCtx.currentTime + 0.5);
+            }
+        }
+
+        // --- ИНИЦИАЛИЗАЦИЯ ---
+        initSpace();
+        animate();
+        setInterval(fetchISS, 10000);
+        fetchISS();
+
+        setInterval(() => {
+            const d = new Date();
+            document.getElementById('clock').innerText = d.getHours() + ":" + String(d.getMinutes()).padStart(2, '0');
+        }, 1000);
+
+        window.onresize = () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+    </script>
+</body>
+</html>
